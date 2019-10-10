@@ -12,6 +12,29 @@ tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 def scale(X, X_min, X_max):
     return (X - X_min)/(X_max-X_min)
 
+# build a feedforward network
+def ffn(x, hidden_units):
+    
+  with tf.name_scope('hidden'):
+    weights = tf.Variable(
+      tf.truncated_normal([no_features, hidden_units],
+                            stddev=1.0 / np.sqrt(float(no_features))),
+        name='weights')
+    biases = tf.Variable(tf.zeros([hidden_units]),
+                         name='biases')
+    h = tf.nn.relu(tf.matmul(x, weights) + biases)
+    
+  with tf.name_scope('output'):
+    weights = tf.Variable(
+        tf.truncated_normal([hidden_units, 1],
+                            stddev=1.0 / np.sqrt(float(hidden_units))),
+        name='weights')
+    biases = tf.Variable(tf.zeros([1]),
+                         name='biases')
+    u = tf.nn.softmax(tf.matmul(h, weights) + biases)
+    
+  return u
+
 NUM_FEATURES = 21
 NUM_CLASSES = 3
 
@@ -25,18 +48,21 @@ np.random.seed(seed)
 #read train data
 
 train_input = np.genfromtxt('ctg_data_cleaned.csv', delimiter= ',')
+#divide 2D array to training set
 trainX, train_Y = train_input[1:, :21], train_input[1:,-1].astype(int)
+#normalize the X to [0,1]
 trainX = scale(trainX, np.min(trainX, axis=0), np.max(trainX, axis=0))
-
+#create a matrix of dimension train_y row x 3 filled with zeros 
 trainY = np.zeros((train_Y.shape[0], NUM_CLASSES))
+#create classification matrix
 trainY[np.arange(train_Y.shape[0]), train_Y-1] = 1 #one hot matrix
 
-
 # experiment with small datasets
-trainX = trainX[:1000]
-trainY = trainY[:1000]
-
-n = trainX.shape[0]
+# divide to training set and test set (70:30)
+testX = trainX[:638]
+testY = trainY[:638]
+trainX = trainx[638:]
+trainY = trainY[638:]
 
 
 # Create the model
@@ -45,9 +71,9 @@ y_ = tf.placeholder(tf.float32, [None, NUM_CLASSES])
 
 # Build the graph for the deep net
 	
-weights = tf.Variable(tf.truncated_normal([NUM_FEATURES, NUM_CLASSES], stddev=1.0/math.sqrt(float(NUM_FEATURES))), name='weights')
-biases  = tf.Variable(tf.zeros([NUM_CLASSES]), name='biases')
-logits  = tf.matmul(x, weights) + biases
+##weights = tf.Variable(tf.truncated_normal([NUM_FEATURES, NUM_CLASSES], stddev=1.0/math.sqrt(float(NUM_FEATURES))), name='weights')
+##biases  = tf.Variable(tf.zeros([NUM_CLASSES]), name='biases')
+##logits  = tf.matmul(x, weights) + biases
 
 cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=logits)
 loss = tf.reduce_mean(cross_entropy)
