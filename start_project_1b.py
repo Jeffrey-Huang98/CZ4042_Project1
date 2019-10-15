@@ -12,7 +12,7 @@ NUM_FEATURES = 7
 
 learning_rate = 0.001
 beta = 0.001
-epochs = 10000
+epochs = 1000
 
 batch_size = 8
 num_neuron = 10
@@ -28,10 +28,10 @@ def main():
 	X_data = (X_data - np.mean(X_data, axis=0))/ np.std(X_data, axis=0)
 
 	# divide to training set and test set (70:30)
-	testX = X_data[280:]
-	testY = Y_data[280:]
-	trainX = X_data[:280]
-	trainY = Y_data[0:280]
+	testX = X_data[:120]
+	testY = Y_data[:120]
+	trainX = X_data[120:]
+	trainY = Y_data[120:]
 
 	# Create the model
 	x = tf.placeholder(tf.float32, [None, NUM_FEATURES])
@@ -49,14 +49,17 @@ def main():
 	# Create the gradient descent optimizer with the given learning rate.
 	optimizer = tf.train.GradientDescentOptimizer(learning_rate)
 	regularization = tf.nn.l2_loss(w1) + tf.nn.l2_loss(w2)
-	cost = tf.reduce_mean(tf.reduce_sum(tf.square(y - y_), axis = 1))
-	loss = tf.reduce_mean(cost + beta*regularization)
+	error = tf.reduce_mean(tf.square(y - y_))
+	loss = tf.reduce_mean(error + beta*regularization)
+	predicted = y
 	global_step = tf.Variable(0, name='global_step', trainable=False)
 	train_op = optimizer.minimize(loss, global_step=global_step)
 
 	# train
 	N = len(trainX)
 	idx = np.arange(N)
+	
+	print(y)
 	with tf.Session() as sess:
 		sess.run(tf.global_variables_initializer())
 
@@ -69,10 +72,22 @@ def main():
 			for start, end in zip(range(0, N, batch_size), range(batch_size, N, batch_size)):
 				train_op.run(feed_dict={x: trainX[start:end], y_: trainY[start:end]})
 
-			tr_err.append(loss.eval(feed_dict={x:trainX, y_:trainY}))
-			te_err.append(loss.eval(feed_dict={x:testX, y_:testY}))
+			tr_err.append(error.eval(feed_dict={x:trainX, y_:trainY}))
+			te_err.append(error.eval(feed_dict={x:testX, y_:testY}))
+		
 			if i%10 == 0:
 				print('batch %d: iter %d, train error %g, test error %g'%(batch_size, i, tr_err[i], te_err[i]))
+		
+		min_err = np.argmin(te_err)
+		print(min_err)
+		
+		N = len(testX)
+		idx = np.arange(N)
+		np.random.shuffle(idx)
+		testX, testY = testX[idx], testY[idx]
+		target = testY[:50]
+		testX = testX[:50]
+		pred = predicted.eval(feed_dict={x:testX, y_:target})
 
 	# plot learning curves
 	plt.figure(1)
@@ -81,6 +96,15 @@ def main():
 	plt.xlabel(str(epochs) + ' iterations')
 	plt.ylabel('mean square error')
 	plt.legend()
+
+	plt.figure(2)
+	plt.plot(target, 'b^', label='targets')
+	plt.plot(pred, 'ro', label='predicted')
+	plt.xlabel('$y_1$')
+	plt.ylabel('$y_2$')
+	plt.title('target and predicted outputs')
+	plt.legend()
+
 	plt.show()
 
 if __name__ == '__main__':
