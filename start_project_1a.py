@@ -25,7 +25,8 @@ def scale(X, X_min, X_max):
 
 # build a feedforward network
 def ffn(x, hidden_units):
-    
+
+  # hidden layer  
   with tf.name_scope('hidden'):
     weights = tf.Variable(
       tf.truncated_normal([NUM_FEATURES, hidden_units], stddev=1.0 / np.sqrt(float(NUM_FEATURES))),
@@ -33,6 +34,7 @@ def ffn(x, hidden_units):
     biases = tf.Variable(tf.zeros([hidden_units]),name='biases')
     h = tf.nn.relu(tf.matmul(x, weights) + biases)
     
+  # output layer
   with tf.name_scope('output'):
     weights = tf.Variable(
         tf.truncated_normal([hidden_units, NUM_CLASSES], stddev=1.0 / np.sqrt(float(hidden_units))),
@@ -43,101 +45,112 @@ def ffn(x, hidden_units):
   return u
 
 # train the network and find errors
-def train_exp():
-  #read train data
+def train_exp(batch_size):
+  # read train data
 
   train_input = np.genfromtxt('ctg_data_cleaned.csv', delimiter= ',')
-  #divide 2D array to training set
+  # divide 2D array to training set
   trainX, train_Y = train_input[1:, :21], train_input[1:,-1].astype(int)
-  #normalize the X to [0,1]
+  # normalize the X to [0,1]
   trainX = scale(trainX, np.min(trainX, axis=0), np.max(trainX, axis=0))
-  #create a matrix of dimension train_y row x 3 filled with zeros 
+  # create a matrix of dimension train_y row x 3 filled with zeros 
   trainY = np.zeros((train_Y.shape[0], NUM_CLASSES))
-  #create classification matrix
+  # create classification matrix
   trainY[np.arange(train_Y.shape[0]), train_Y-1] = 1 #one hot matrix
 
-  # experiment with small datasets
-  # divide to training set and test set (70:30)
+  # divide the data into training set and test set (70:30)
   testX = trainX[:638]
   testY = trainY[:638]
-  trainX = trainX[638:]
-  trainY = trainY[638:]
+  trainingX = trainX[638:]
+  trainingY = trainY[638:]
+  print(trainingY)
 
+
+  # calculate the general fold size 
+  fold_size = len(trainingX) // num_folds
+  # calculate the number of surplus records
+  surplus_size = len(trainingX) % num_folds
+
+  start_ = 0
   err = []
   for fold in range(num_folds):
-      start, end = fold*20, (fold+1)*20
-      x_test, y_test = trainX[start:end], trainY[start:end]
-      x_train  = np.append(trainX[:start], trainX[end:], axis=0)
-      y_train = np.append(trainY[:start], trainY[end:], axis=0) 
+    if(surplus_size != 0):
+      start, end = start_, (fold+1)*(fold_size + 1)
+      start_ = end
+      surplus_size -= 1
+    else:
+      start, end = start_, start_+fold_size
+      start_ = end
 
-      err_ = []
-      for no_hidden in num_neurons:
-          x = tf.placeholder(tf.float32, [None, NUM_FEATURES])
-          y_ = tf.placeholder(tf.float32, [None, 1])
+    x_test, y_test = trainingX[start:end], trainingY[start:end]
+    x_train  = np.append(trainingX[:start], trainingX[end:], axis=0)
+    y_train = np.append(trainingY[:start], trainingY[end:], axis=0) 
+    print(y_train)
 
-          y = ffn(x, no_hidden)
+    # Create the model
+    x = tf.placeholder(tf.float32, [None, NUM_FEATURES])
+    y_ = tf.placeholder(tf.float32, [None, NUM_CLASSES])
 
-          # Create the model
+	  # Build the graph for the deep net
+    y = ffn(x, batch_size)
 
-          loss = tf.reduce_mean(tf.reduce_sum(tf.square(y_ - y),axis=1))
+    cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=y)
+    loss = tf.reduce_mean(cross_entropy)
+
+    # loss = tf.reduce_mean(tf.reduce_sum(tf.square(y_ - y),axis=1))
+
+    train = tf.train.GradientDescentOptimizer(learning_rate)
+    train_op = train.minimize(loss)
+
+    correct_prediction = tf.cast(tf.equal(tf.argmax(y, 1), tf.argmax(y_, 1)), tf.float32)
+    accuracy = tf.reduce_mean(correct_prediction)
+    
+    err_ = []
+    # train
+    N = len(x_train)
+    idx = np.arange(N)
+    with tf.Session() as sess:
+      sess.run(tf.global_variables_initializer())
+      train_acc = []
+      for i in range(epochs):
+        np.random.shuffle(idx)
+        x_train = x_train[idx]
+        y_train = y_train[idx]
+
+        for start, end in zip(range(0, N, batch_size), range(batch_size, N, batch_size)):
+          train_op.run(feed_dict={x: x_train[start:end], y_: y_train[start:end]})
+          
+        train_acc.append(loss.eval(feed_dict={x:x_test, y_:y_test}))
+        if i % 100 == 0:
+          print('batch %d: iter %d,  accuracy %g'%(batch_size, i, train_acc[i]))
+        err.append(train_acc)
       
-          train = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
-      
-          # train
-          with tf.Session() as sess:
-              tf.global_variables_initializer().run()
-
-              for i in range(epochs):
-                  train.run(feed_dict={x:x_train, y_: y_train})
-                  
-              err_.append(loss.eval(feed_dict={x:x_test, y_:y_test}))
-      
-      err.append(err_)
-
-  
+      err.append(loss.eval(feed_dict={x:x_test, y_:y_test}))
+       
   cv_err = np.mean(np.array(err), axis = 0)
   print('cv errors {}'.format(cv_err))
 
-  return cv_err
+  return cv_err, train_acc
+
+
+def main():
+
+  # perform experiments
+  err, train_acc = train_exp(32)
+
+  # compute mean error
+  mean_err = np.mean(np.array(err), axis = 0)
+  print(mean_err)
+  
+  # plot learning curves
+  plt.figure(1)
+  plt.plot(range(epochs), train_acc)
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('Train accuracy')
+  plt.show()
 
 
 
-
-# Create the model
-x = tf.placeholder(tf.float32, [None, NUM_FEATURES])
-y_ = tf.placeholder(tf.float32, [None, NUM_CLASSES])
-
-# Build the graph for the deep net
-	
-weights = tf.Variable(tf.truncated_normal([NUM_FEATURES, NUM_CLASSES], stddev=1.0/math.sqrt(float(NUM_FEATURES))), name='weights')
-biases  = tf.Variable(tf.zeros([NUM_CLASSES]), name='biases')
-logits  = tf.matmul(x, weights) + biases
-
-cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=logits)
-loss = tf.reduce_mean(cross_entropy)
-
-# Create the gradient descent optimizer with the given learning rate.
-optimizer = tf.train.GradientDescentOptimizer(learning_rate)
-train_op = optimizer.minimize(loss)
-
-correct_prediction = tf.cast(tf.equal(tf.argmax(logits, 1), tf.argmax(y_, 1)), tf.float32)
-accuracy = tf.reduce_mean(correct_prediction)
-
-with tf.Session() as sess:
-    sess.run(tf.global_variables_initializer())
-    train_acc = []
-    for i in range(epochs):
-        train_op.run(feed_dict={x: trainX, y_: trainY})
-        train_acc.append(accuracy.eval(feed_dict={x: trainX, y_: trainY}))
-
-        if i % 100 == 0:
-            print('iter %d: accuracy %g'%(i, train_acc[i]))
-
-
-# plot learning curves
-plt.figure(1)
-plt.plot(range(epochs), train_acc)
-plt.xlabel(str(epochs) + ' iterations')
-plt.ylabel('Train accuracy')
-plt.show()
+if __name__ == '__main__':
+    main()
 
