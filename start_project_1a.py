@@ -14,7 +14,7 @@ NUM_CLASSES = 3
 
 learning_rate = 0.01
 beta = 0.000001
-epochs = 1000
+epochs = 3000
 batch_size = 32
 num_neurons = 10
 num_folds = 5
@@ -80,22 +80,25 @@ def train_exp(batch_size, num_neurons, beta):
   cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=u)
   loss = tf.reduce_mean(cross_entropy + beta*regularization)
 
-  # loss = tf.reduce_mean(tf.reduce_sum(tf.square(y_ - y),axis=1))
-
   train = tf.train.GradientDescentOptimizer(learning_rate)
-
   train_op = train.minimize(loss)
 
   correct_prediction = tf.cast(tf.equal(tf.argmax(u, 1), tf.argmax(y_, 1)), tf.float32)
+  error_prediction = tf.cast(tf.not_equal(tf.argmax(u, 1), tf.argmax(y_, 1)), tf.float32)
+  error = tf.reduce_mean(error_prediction)
   accuracy = tf.reduce_mean(correct_prediction)
 
   start_ = 0
+  train_err = []
+  test_err = []
+  validation_err = []
   train_acc = []
   test_acc = []
   validation_acc = []
   time_taken = 0
 
   for fold in range(num_folds):
+    # divide the fold into 5 equal parts 
     if(surplus_size != 0):
       start, end = start_, (fold+1)*(fold_size + 1)
       start_ = end
@@ -113,14 +116,10 @@ def train_exp(batch_size, num_neurons, beta):
     N = len(x_train)
     idx = np.arange(N)
 
-    # train_acc_ = []
-    # test_acc_ = []
-    # validation_acc_ = []
     with tf.Session() as sess:
       sess.run(tf.global_variables_initializer())
       
       time_to_update = 0
-      # for batch in batch_size:
       for i in range(epochs):
         np.random.shuffle(idx)
         x_train = x_train[idx]
@@ -129,16 +128,30 @@ def train_exp(batch_size, num_neurons, beta):
         t = time.time()
         for start, end in zip(range(0, N, batch_size), range(batch_size, N, batch_size)):
           train_op.run(feed_dict={x: x_train[start:end], y_: y_train[start:end]})
+        # handle the data that is not used after batching  
+        if(N % batch_size != 0):
+          start = N//batch_size
+          train_op.run(feed_dict={x:x_train[start:], y_: y_train[start:]})
         time_to_update += time.time() - t
-
+        
+        cur_train_err = error.eval(feed_dict={x:x_train, y_:y_train})        
+        cur_test_err = error.eval(feed_dict={x:testX, y_:testY})
+        cur_validation_err = error.eval(feed_dict={x:x_valid, y_:y_valid})
         cur_train_acc = accuracy.eval(feed_dict={x:x_train, y_:y_train})
         cur_test_acc = accuracy.eval(feed_dict={x:testX, y_:testY})
         cur_validation_acc = accuracy.eval(feed_dict={x:x_valid, y_:y_valid})
-        if fold == 0: 
+        
+        if fold == 0:
+          train_err.append(cur_train_err)
+          test_err.append(cur_test_err)
+          validation_err.append(cur_validation_err)  
           train_acc.append(cur_train_acc)
           test_acc.append(cur_test_acc)
           validation_acc.append(cur_validation_acc)
         else:
+          train_err[i] += cur_train_err
+          test_err[i] += cur_test_err
+          validation_err[i] += cur_validation_err
           train_acc[i] += cur_train_acc
           test_acc[i] += cur_test_acc
           validation_acc[i] += cur_validation_acc
@@ -146,22 +159,18 @@ def train_exp(batch_size, num_neurons, beta):
           print('fold %g batch %d: iter %d,  train_accuracy %g, validation_accuracy %g, test_accuracy %g'%(fold+1, batch_size, i, cur_train_acc, cur_validation_acc, cur_test_acc))
       
       time_taken += time_to_update/epochs
-
-      # err.append(train_acc)
-    
-      # train_acc.append(train_acc_)
-      # test_acc.append(test_acc_)
-      # validation_acc.append(validation_acc_)
-       
-  # cv_err = np.mean(np.array(err), axis = 0)
-  # print('cv errors {}'.format(cv_err))
+      
+  # divide the accuracy element wise with the number of folds
+  train_err = np.divide(train_err, num_folds)
+  test_err = np.divide(test_err, num_folds)
+  validation_err = np.divide(validation_err, num_folds)
   train_acc = np.divide(train_acc, num_folds)
   test_acc = np.divide(test_acc, num_folds)
   validation_acc = np.divide(validation_acc, num_folds)
 
-  return train_acc, validation_acc, test_acc, time_taken
+  return train_acc, validation_acc, test_acc, train_err, validation_err, test_err, time_taken
 
-def train_exp_ffn_4(batch_size, hidden1, hidden2):
+def train_exp_ffn_4(batch_size, hidden1, hidden2, beta):
 
   # Create the model
   x = tf.placeholder(tf.float32, [None, NUM_FEATURES])
@@ -209,18 +218,13 @@ def train_exp_ffn_4(batch_size, hidden1, hidden2):
   # calculate the general fold size 
   fold_size = len(trainingX) // num_folds
   # calculate the number of surplus records
-  surplus_size = len(trainingX) % num_folds
-
- 
+  surplus_size = len(trainingX) % num_folds 
 
   regularization = tf.nn.l2_loss(w1) + tf.nn.l2_loss(w2)  + tf.nn.l2_loss(w3)
   cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=u)
   loss = tf.reduce_mean(cross_entropy + beta*regularization)
 
-  # loss = tf.reduce_mean(tf.reduce_sum(tf.square(y_ - y),axis=1))
-
   train = tf.train.GradientDescentOptimizer(learning_rate)
-
   train_op = train.minimize(loss)
 
   correct_prediction = tf.cast(tf.equal(tf.argmax(u, 1), tf.argmax(y_, 1)), tf.float32)
@@ -250,14 +254,11 @@ def train_exp_ffn_4(batch_size, hidden1, hidden2):
     N = len(x_train)
     idx = np.arange(N)
 
-    # train_acc_ = []
-    # test_acc_ = []
-    # validation_acc_ = []
+
     with tf.Session() as sess:
       sess.run(tf.global_variables_initializer())
       
       time_to_update = 0
-      # for batch in batch_size:
       for i in range(epochs):
         np.random.shuffle(idx)
         x_train = x_train[idx]
@@ -266,6 +267,7 @@ def train_exp_ffn_4(batch_size, hidden1, hidden2):
         t = time.time()
         for start, end in zip(range(0, N, batch_size), range(batch_size, N, batch_size)):
           train_op.run(feed_dict={x: x_train[start:end], y_: y_train[start:end]})
+        # handle the data that is not used after batching
         if(N % batch_size != 0):
           start = N//batch_size
           train_op.run(feed_dict={x:x_train[start:], y_: y_train[start:]})
@@ -274,7 +276,8 @@ def train_exp_ffn_4(batch_size, hidden1, hidden2):
         cur_train_acc = accuracy.eval(feed_dict={x:x_train, y_:y_train})
         cur_test_acc = accuracy.eval(feed_dict={x:testX, y_:testY})
         cur_validation_acc = accuracy.eval(feed_dict={x:x_valid, y_:y_valid})
-        if fold == 0: 
+        
+        if fold == 0:
           train_acc.append(cur_train_acc)
           test_acc.append(cur_test_acc)
           validation_acc.append(cur_validation_acc)
@@ -287,14 +290,7 @@ def train_exp_ffn_4(batch_size, hidden1, hidden2):
       
       time_taken += time_to_update/epochs
 
-      # err.append(train_acc)
-    
-      # train_acc.append(train_acc_)
-      # test_acc.append(test_acc_)
-      # validation_acc.append(validation_acc_)
-       
-  # cv_err = np.mean(np.array(err), axis = 0)
-  # print('cv errors {}'.format(cv_err))
+  # divide the accuracy element wise with the number of folds
   train_acc = np.divide(train_acc, num_folds)
   test_acc = np.divide(test_acc, num_folds)
   validation_acc = np.divide(validation_acc, num_folds)
@@ -302,39 +298,47 @@ def train_exp_ffn_4(batch_size, hidden1, hidden2):
 
   return train_acc, validation_acc, test_acc, time_taken
 
+def q1():
+  #--------------------------------------------------------------------------------------------------------------------------------
+  # Q1
+  # initialize variables
+  batch_size = 32
+  num_neurons = 10
+  beta = 1e-6
 
-def main():
-  # #---------------------------------------------------------------------
-  # # Q1
-  # # initialize variables
-  # batch_size = 32
-  # num_neurons = 10
-  # beta = 1e-6
+  # perform experiments
+  train_acc, validation_acc, test_acc, train_err, validation_err, test_err, time_taken = train_exp(batch_size, num_neurons, beta)
 
-  # # perform experiments
-  # train_acc, validation_acc, test_acc, time_taken = train_exp(batch_size, num_neurons, beta)
+  # plot learning curves
+  plt.figure(1)
+  plt.plot(range(epochs), train_acc, label='train accuracy')
+  plt.plot(range(epochs), validation_acc, label='validation accuracy')
+  plt.plot(range(epochs), test_acc, label='test accuracy')
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('accuracy')
+  plt.title('Accuracy against epochs')
+  plt.legend()
+  plt.show()
 
-  # # compute mean error
-  # # mean_err = np.mean(np.array(err), axis = 0)
-  # # print(mean_err)
-  
-  # # plot learning curves
-  # plt.figure(1)
-  # plt.plot(range(epochs), train_acc, label='train accuracy')
-  # plt.plot(range(epochs), validation_acc, label='validation accuracy')
-  # plt.plot(range(epochs), test_acc, label='test accuracy')
-  # # plt.yticks(np.arange(0.5, 1.0, 0.1))
-  # plt.xlabel(str(epochs) + ' iterations')
-  # plt.ylabel('accuracy')
-  # plt.legend()
-  # plt.show()
+  # plot learning curves
+  plt.figure(2)
+  plt.plot(range(epochs), test_err, label='test error')
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('error')
+  plt.title('Test Error against epochs')
+  plt.legend()
+  plt.show()
 
-  # ----------------------------------------------------------------
+def q2():
+  # --------------------------------------------------------------------------------------------------------------------
   # Q2
   # initialize variables 
   batch_size = [4,8,16,32,64]
   num_neurons = 10
   beta = 1e-6
+  train_err = []
+  validation_err = []
+  test_err = []
   train_acc = []
   validation_acc = []
   test_acc = []
@@ -342,28 +346,28 @@ def main():
 
   # perform experiments
   for batch in batch_size:
-    train, validation, test, time_update = train_exp(batch, num_neurons, beta)
-    train_acc.append(train)
-    validation_acc.append(validation)
-    test_acc.append(test)
+    acc_train, acc_validation, acc_test, err_train, err_validation, err_test, time_update = train_exp(batch, num_neurons, beta)
+    train_err.append(err_train)
+    validation_err.append(err_validation)
+    test_err.append(err_test)
+    train_acc.append(acc_train)
+    validation_acc.append(acc_validation)
+    test_acc.append(acc_test)
     time_taken.append(time_update)
 
   # Q2a
   # plot learning curves
-  plt.figure(2)
+  plt.figure(3)
   for i in range(len(batch_size)):
     plt.plot(range(epochs), validation_acc[i], label='batch %d'%batch_size[i])
   plt.xlabel(str(epochs) + ' iterations')
   plt.ylabel('cross-validation accuracy')
-  plt.yticks(np.arange(0.5, 1.0, 0.1))
   plt.legend()
-  plt.title('')
+  plt.title('Cross-Validation Accuracy for Different Batch Sizes')
   plt.show()
 
   # plot learning curves
-  plt.figure(3)
-  # for i in range(len(batch_size)):
-  #   plt.plot(range(batch_size[-1]), time_taken[i], label='batch %d'%batch_size[i])
+  plt.figure(4)
   plt.plot(time_taken)
   plt.xticks(range(5), batch_size)  
   plt.xlabel('batch size')
@@ -375,123 +379,176 @@ def main():
   # Q2c
   # plot learning curves
   for i in range (len(batch_size)):
-    plt.figure(i+4)
+    plt.figure(i+5)
     plt.plot(range(epochs), train_acc[i], label='train accuracy')
     plt.plot(range(epochs), test_acc[i], label='test accuracy')
-    # plt.yticks(np.arange(0.5, 1.0, 0.1))
     plt.xlabel(str(epochs) + ' iterations')
     plt.ylabel('accuracy')
     plt.legend()
     plt.title('Accuracies against epochs for batch size %d'%batch_size[i])
     plt.show()
 
-#   #----------------------------------------------------------------------------
-#   # Q3
-#   # initialize variables
-#   num_neurons = [5,10,15,20,25]
-#   batch_size = 32
-#   beta = 1e-6
-#   train_acc = []
-#   validation_acc = []
-#   test_acc = []
-#   time_taken = []
+def q3():
+  #-----------------------------------------------------------------------------------------------------------------------
+  # Q3
+  # initialize variables
+  num_neurons = [5,10,15,20,25]
+  batch_size = 64
+  beta = 1e-6
+  train_err = []
+  validation_err = []
+  test_err = []
+  train_acc = []
+  validation_acc = []
+  test_acc = []
+  time_taken = []
 
-#   for hidden in num_neurons:
-#     train, validation, test, time_update = train_exp(batch_size, hidden, beta)
-#     train_acc.append(train)
-#     validation_acc.append(validation)
-#     test_acc.append(test)
-#     time_taken.append(time_update)
+  for hidden in num_neurons:
+    acc_train, acc_validation, acc_test, err_train, err_validation, err_test, time_update = train_exp(batch_size, hidden, beta)
+    train_err.append(err_train)
+    validation_err.append(err_validation)
+    test_err.append(err_test)
+    train_acc.append(acc_train)
+    validation_acc.append(acc_validation)
+    test_acc.append(acc_test)
+    time_taken.append(time_update)
 
-#  # plot learning curves
-#   plt.figure(9)
-#   for i in range(len(num_neurons)):
-#     plt.plot(range(epochs), validation_acc[i], label='neurons %d'%num_neurons[i])
-#   plt.xlabel(str(epochs) + ' iterations')
-#   plt.ylabel('cross-validation accuracy')
-#  # plt.yticks(np.arange(0.5, 1.0, 0.1))
-#   plt.legend()
-#   plt.title('Cross-Validation Accuracies for Different Number of Hidden Neurons')
-#   plt.show()
+  # plot learning curves
+  plt.figure(10)
+  for i in range(len(num_neurons)):
+    plt.plot(range(epochs), validation_acc[i], label='neurons %d'%num_neurons[i])
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('cross-validation accuracy')
+  plt.legend()
+  plt.title('Cross-Validation Accuracies for Different Number of Hidden Neurons')
+  plt.show()
 
-#   # Q3c
-#   # plot learning curves
-#   for i in range (len(num_neurons)):
-#     plt.figure(i+10)
-#     plt.plot(range(epochs), train_acc[i], label='train accuracy')
-#     plt.plot(range(epochs), test_acc[i], label='test accuracy')
-#     plt.xlabel(str(epochs) + ' iterations')
-#     plt.ylabel('accuracy')
-#   #  plt.yticks(np.arange(0.5, 1.0, 0.1))
-#     plt.legend()
-#     plt.title('Accuracies against epochs for %d hidden neurons'%num_neurons[i])
-#     plt.show()
+  # Q3c
+  # plot learning curves
+  for i in range (len(num_neurons)):
+    plt.figure(i+11)
+    plt.plot(range(epochs), train_acc[i], label='train accuracy')
+    plt.plot(range(epochs), test_acc[i], label='test accuracy')
+    plt.xlabel(str(epochs) + ' iterations')
+    plt.ylabel('accuracy')
+    plt.legend()
+    plt.title('Accuracies against epochs for %d hidden neurons'%num_neurons[i])
+    plt.show()
 
-#   #-------------------------------------------------------------------------
-#   # Q4
-#   # Initialize variables
-#   num_neurons = 15
-#   batch_size = 32
-#   beta_values = [0, 1e-3, 1e-6, 1e-9, 1e-12]
-#   train_acc = []
-#   validation_acc = []
-#   test_acc = []
-#   time_taken = []
+def q4():
+    #---------------------------------------------------------------------------------------------------------------------
+  # Q4
+  # Initialize variables
+  num_neurons = 20
+  batch_size = 32
+  beta_values = [0, 1e-3, 1e-6, 1e-9, 1e-12]
+  train_err = []
+  validation_err = []
+  test_err = []
+  train_acc = []
+  validation_acc = []
+  test_acc = []
+  time_taken = []
 
-#   for beta in beta_values:
-#     train, validation, test, time_update = train_exp(batch_size, num_neurons, beta)
-#     train_acc.append(train)
-#     validation_acc.append(validation)
-#     test_acc.append(test)
-#     time_taken.append(time_update)
+  for beta in beta_values:
+    acc_train, acc_validation, acc_test, err_train, err_validation, err_test, time_update = train_exp(batch_size, num_neurons, beta)
+    train_err.append(err_train)
+    validation_err.append(err_validation)
+    test_err.append(err_test)
+    train_acc.append(acc_train)
+    validation_acc.append(acc_validation)
+    test_acc.append(acc_test)
+    time_taken.append(time_update)
 
-#  # plot learning curves
-#   plt.figure(15)
-#   for i in range(len(beta_values)):
-#     plt.plot(range(epochs), validation_acc[i], label='beta %d'%beta_values[i])
-#   plt.xlabel(str(epochs) + ' iterations')
-#   plt.ylabel('cross-validation accuracy')
-#  # plt.yticks(np.arange(0.5, 1.0, 0.1))
-#   plt.legend()
-#   plt.title('Cross-Validation Accuracies for Different Beta Values')
-#   plt.show()
+ # plot learning curves
+  plt.figure(16)
+  for i in range(len(beta_values)):
+    plt.plot(range(epochs), validation_acc[i], label='beta %g'%beta_values[i])
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('cross-validation accuracy')
+  plt.legend()
+  plt.title('Cross-Validation Accuracies for Different Beta Values')
+  plt.show()
 
-#   # Q4c
-#   # plot learning curves
-#   for i in range (len(beta_values)):
-#     plt.figure(i+16)
-#     plt.plot(range(epochs), train_acc[i], label='train accuracy')
-#     plt.plot(range(epochs), test_acc[i], label='test accuracy')
-#     plt.xlabel(str(epochs) + ' iterations')
-#     plt.ylabel('accuracy')
-#   #  plt.yticks(np.arange(0.5, 1.0, 0.1))
-#     plt.legend()
-#     plt.title('Accuracies against epochs for beta %d'%beta_values[i])
-#     plt.show()
+  # Q4c
+  # plot learning curves
+  for i in range (len(beta_values)):
+    plt.figure(i+17)
+    plt.plot(range(epochs), train_acc[i], label='train accuracy')
+    plt.plot(range(epochs), test_acc[i], label='test accuracy')
+    plt.xlabel(str(epochs) + ' iterations')
+    plt.ylabel('accuracy')
+    plt.legend()
+    plt.title('Accuracies against epochs for beta %g'%beta_values[i])
+    plt.show()
 
-#   # Q5
-#   # Initialize variables
-#   num_neurons = 10
-#   batch_size = 32
-#   train_acc = []
-#   validation_acc = []
-#   test_acc = []
-#   time_taken = []
+def q5():
+  #-------------------------------------------------------------------------------------------------------------------
+  # Q5
+  # Initialize variables for 4-layer network
+  num_neurons_4 = 10
+  batch_size_4 = 32
+  beta_4 = 1e-6
+  train_acc_4 = []
+  validation_acc_4 = []
+  test_acc_4 = []
+  time_taken_4 = []
 
-#   # perform experiments
-#   train_acc, validation_acc, test_acc, time_taken = train_exp_ffn_4(batch_size, num_neurons, num_neurons)
+  # perform experiments
+  train_acc_4, validation_acc_4, test_acc_4, time_taken_4 = train_exp_ffn_4(batch_size_4, num_neurons_4, num_neurons_4, beta_4)
 
-#   # plot learning curves
-#   plt.figure(21)
-#   plt.plot(range(epochs), train_acc, label='train accuracy')
-#   plt.plot(range(epochs), validation_acc, label='validation accuracy')
-#   plt.plot(range(epochs), test_acc, label='test accuracy')
-#   # plt.yticks(np.arange(0.5, 1.0, 0.1))
-#   plt.xlabel(str(epochs) + ' iterations')
-#   plt.ylabel('accuracy')
-#   plt.legend()
-#   plt.show()
+  # Initialize variables for 3-layer network
+  num_neurons_3 = 20
+  batch_size_3 = 64
+  beta_3 = 1e-3
+  train_err_3 = []
+  validation_err_3 = []
+  test_err_3 = []
+  train_acc_3 = []
+  validation_acc_3 = []
+  test_acc_3 = []
+  time_taken_3 = []
 
+  # perform experiment
+  train_acc_3, validation_acc_3, test_acc_3, train_err_3, validation_err_3, test_err_3, time_taken_3 = train_exp(batch_size_3, num_neurons_3, beta_3)
+
+  # plot learning curves
+  plt.figure(22)
+  plt.plot(range(epochs), train_acc_4, label='train accuracy')
+  plt.plot(range(epochs), validation_acc_4, label='validation accuracy')
+  plt.plot(range(epochs), test_acc_4, label='test accuracy')
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('accuracy')
+  plt.legend()
+  plt.show()
+
+  # plot comparison curves
+  plt.figure(23)
+  plt.plot(range(epochs), train_acc_4, label='4-layer')
+  plt.plot(range(epochs), train_acc_3, label='3-layer')
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('training accuracy')
+  plt.legend()
+  plt.title('Training accuracy for 3-layer and 4-layer network')
+  plt.show()
+
+  # plot comparison curves
+  plt.figure(24)
+  plt.plot(range(epochs), test_acc_4, label='4-layer')
+  plt.plot(range(epochs), test_acc_3, label='3-layer')
+  plt.xlabel(str(epochs) + ' iterations')
+  plt.ylabel('test accuracy')
+  plt.legend()
+  plt.title('Test accuracy for 3-layer and 4-layer network')
+  plt.show()
+
+def main():
+
+  q1()
+  q2()
+  q3()
+  q4()
+  q5()
 
 if __name__ == '__main__':
     main()
